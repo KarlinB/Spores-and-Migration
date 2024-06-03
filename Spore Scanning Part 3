@@ -1,0 +1,153 @@
+# third file in approach of generating a local blast database of sporulators
+######################################### Imports ############################################
+from Bio import Entrez
+import time
+import os
+Entrez.email = "karlin.havlak@gmail.com"
+############################### PART 3, Make Final FTP List ###################################### 
+
+# have to rebuild genomes dictionary here
+genomes = {}
+organisms = {}
+with open('genomesDict.txt', 'r') as inFile:
+    for line in inFile:
+        assemblies = {}
+        line = line.split('\t')
+        gene = line[0]
+        org = line[1]
+        assembly = line[2][0:-1]
+        if gene in genomes:
+            if org in genomes[gene]:
+                assemblies[assembly] = []
+                organisms[org] |= assemblies
+                genomes[gene] = organisms
+            else:
+                assemblies[assembly] = []
+                organisms[org] = assemblies
+                genomes[gene] = organisms
+        else:
+            organisms = {}
+            assemblies[assembly] = []
+            organisms[org] = assemblies
+            genomes[gene] = organisms
+            
+#print(genomes)
+
+# this nested loop uses assemblies to get the ftp links and labels and store them
+genomeCount = 0
+deletes = 0
+for gene in genomes:
+    print("getting links for", gene)
+    for organism in genomes[gene]:
+        for assembly in genomes[gene][organism]:
+            # use assembly to get another needed id
+            handle = Entrez.esearch(db = "assembly", term = assembly)
+            result = Entrez.read(handle)
+            #print(result)
+            handle.close()
+            time.sleep(0.5)
+            #get other ID from result list and search for accession
+            if len(result['IdList']) != 0:
+                handle = Entrez.esummary(db="assembly", id=result['IdList'][0], report="full")
+                summary = Entrez.read(handle)
+                handle.close()
+                time.sleep(0.5)
+                url = summary['DocumentSummarySet']['DocumentSummary'][0]['FtpPath_RefSeq']
+                label = os.path.basename(url)
+                link = os.path.join(url+"/",label+'_genomic.fna.gz')
+                #link = os.path.join(url + '/')
+                # quality assurance of information to be downloaded
+                if label != '' and not label.endswith("MAG"): # CUT THIS NICK?? Is it taking out all mags? Want to remove mags fo sho
+                    genomeCount += 1
+                    genomes[gene][organism][assembly].append(link)
+                    genomes[gene][organism][assembly].append(label)
+                else:
+                    deletes += 1
+                    
+print(genomeCount, "genomes remain after", deletes, "deleted.")
+#print(genomes)
+
+with open("forDownload.txt", "w") as outFile:
+    outFile.write("Gene,Organism,ftpLink,DownloadIDs\n")
+    for gene in genomes:
+        for organism in genomes[gene]:
+            for assembly in genomes[gene][organism]:
+                genomeInfo = genomes[gene][organism][assembly]
+                if len(genomeInfo) != 0:
+                    outFile.write(gene + ',' + organism + ',' + genomeInfo[0] + ',' + genomeInfo[1])
+                    outFile.write('\n')
+outFile.close()
+
+'''
+# final list created from genomeInfo text file
+finalList = []
+dupCount = 0
+dups = []
+# upload file and delete duplicates
+with open("forDownload.txt", "r") as inFile:
+    inFile.readline()
+    for line in inFile:
+        line = line.split(',')
+        label = line[3]
+        label = label[0:-1]
+        if label not in dups:
+            dups.append(label)
+            finalList.append([line[2],label])
+        else:
+            dupCount += 1
+
+            
+print(len(dups), "final genomes.", dupCount, "duplicates between organisms removed from final list.")
+'''
+
+
+path = "C:/Users/karli/OneDrive/Documents/Kominsky Lab/Spore Transiency/genomes/"
+
+
+# attempt to download with ftputil, wont move on from first file
+'''
+import ftputil
+with ftputil.FTPHost('ftp.ncbi.nlm.nih.gov', 'anonymous', "karlin.havlak@gmail.com") as ftp:
+    #names = ftp.listdir(ftp_host.curdir)
+    for i in range(0, len(finalList)):
+        genomeLink = finalList[i][0]
+        genomeLink = genomeLink.split('ftp.ncbi.nlm.nih.gov')[1]
+        genomeLabel = finalList[i][1]
+        print(genomeLabel)
+        genomeFile = genomeLabel +'_genomic.fna.gz'
+        ftp.chdir(genomeLink)
+        ftp.download(genomeFile, path+genomeFile)
+'''
+
+# attempt to download with FTP, wont move on from first file
+'''
+from ftplib import FTP
+ftp = FTP('ftp.ncbi.nlm.nih.gov')
+ftp.login(user='anonymous', passwd = "karlin.havlak@gmail.com")
+path = "C:/Users/karli/OneDrive/Documents/Kominsky Lab/Spore Transiency/genomes"
+path = path.replace(' ', '\\ ')
+for i in range(0, len(finalList)):
+    genomeLink = finalList[i][0]
+    genomeLabel = finalList[i][1] 
+    genomeLink = genomeLink.split('ftp.ncbi.nlm.nih.gov')[1]
+    genomeLabel = genomeLabel +'_genomic.fna.gz'
+    #genomeLink = genomeLink.split('//')[1]
+    print(genomeLabel)
+    ftp.cwd(genomeLink)
+    localfile = open(genomeLabel, 'wb')
+    #ftp.retrbinary(path, localfile.write, 1024)
+    ftp.retrbinary("RETR " + genomeLabel, localfile.write, 1024)
+    localfile.close()
+ftp.quit()
+'''
+
+# attempt to download with urllib.request, wont move on from first file
+'''
+path = "C:/Users/karli/OneDrive/Documents/Kominsky Lab/Spore Transiency/genomes"
+#download the fasta link - change this to get other formats
+for i in range(0, len(finalList)):
+    genomeLink = finalList[i][0]
+    genomeLabel = finalList[i][1]
+    urllib.request.urlretrieve(genomeLink, f'{genomeLabel}.fna.gz')
+ftp.close()
+'''
