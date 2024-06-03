@@ -1,0 +1,68 @@
+# last python file used in approach of getting a local blast database of sporulators
+# sort through the file and store how many genes per organism
+# remove duplicates as needed
+with open("Data Files/forDownload.txt", "r") as inFile:
+    inFile.readline()
+    # dictionary to keep track of genes per organism of form {label[organism, link, [genes]]}
+    geneCount = {}
+    # metadata counters
+    numGenomes = 0
+    numMultiGene = 0
+    numDups = 0
+    for line in inFile:
+        line = line.split(',')
+        # control for blank lines
+        if len(line) > 1:
+            label = line[3]
+            # cut off '\n' if needed
+            if '\n' in label:
+                label = label[0:-1]
+            org = line[1]
+            gene = line[0]
+            # put new labels into dictionary
+            if label not in geneCount:
+                numGenomes += 1
+                geneCount[label] = [org, line[2],[gene]]
+            # append new gene into already existing label file
+            elif gene not in geneCount[label][2]:
+                numMultiGene += 1
+                geneCount[label][2].append(gene)
+            # if in dictionary, and not a new gene, label is a duplicate
+            else:
+                numDups += 1
+inFile.close()
+
+print('total genomes:', numGenomes, '; genomes with multiple genes:',
+      numMultiGene, '; duplicate genomes:', numDups)
+
+#print(geneCount)
+
+# change this to determine the minimum number of spore genes required
+# 1 genome with 25 genes (Bacillus halotolerans)
+# 5 thresh = 179 genomes, 6 thresh = 143, 7 thresh = 117, 8 thresh = 87
+geneThresh = 1
+finalCount = 0
+allGenes = []
+# write all final genenome info into a file
+with open("Data Files/finalGenomeList.txt", "w") as f:
+    f.write("Label\tLink\tOrganism\tGene Number\tGene List\n")
+    for label in geneCount:
+        if len(geneCount[label][2]) >= geneThresh:
+            finalCount += 1
+            org = geneCount[label][0]
+            link = geneCount[label][1]
+            geneList = geneCount[label][2]
+            for gene in geneList:
+                allGenes.append(gene)
+            #print(org)
+            f.write(label+'\t'+link+'\t'+org+'\t'+str(len(geneList))
+                    +'\t'+str(geneList)+'\n')
+f.close()
+
+print("Final Genome Tally:", finalCount)
+# this was just to put into table() in R to see most common genes in local BLAST
+with open("Data Files/allGenes.txt", "w") as f:
+    for gene in allGenes:
+        f.write(gene+'\n')
+f.close()
+
