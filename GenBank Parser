@@ -1,0 +1,293 @@
+# look through genbank file annotations for a given gene or gene descriptions
+# this script builds files that keep track of how many genes and descriptions are found as well as a matrix with the number of counts per gene for every genome
+########### this script parses through all files corresponding to OTU "hits"
+
+########### imports
+from Bio import SeqIO
+import os
+
+# create the gene presence/absence matrix file and begin header line
+outMatrix = open("BLAST Directories/BLAST Gene Matrix.txt", "w")
+outMatrix.write("OTU\tGenome\t")
+# open and store the spore genes into a list
+geneList = []
+geneMat = {}
+with open("Data Files\Sporulation Gene List.txt") as sporeGenes:
+    sporeGenes.readline()
+    sporeGenes.readline()
+    # loop over file and put genes in a list
+    for line in sporeGenes:
+        line = line.split()
+        geneList.append(line[0])
+        # create blank gene matrix and finish the header line
+        geneMat[line[0]] = 0
+        outMatrix.write(line[0] + '\t')
+outMatrix.write("Spore Score")
+outMatrix.write('\n')
+        
+sporeGenes.close()
+
+# set the directory to loop through the folder containing OTU folders
+files = []
+directory = os.fsencode("BLAST Directories/Genomes")
+# put the folder names of each OTU into a dictionary
+for file in os.listdir(directory):
+    # check that file format is an unzipped genbank flat file
+    if "gbff" in str(file) and not (".gz" in str(file)):
+        filename = os.fsdecode(file)
+        # dictionary of Otu folder names corresponding to empty list
+        files.append(filename)
+
+
+# count the number of genes per Otu genome
+scores = {}
+descripts = {}
+# set up lists to add in the organism and taxon info
+orgs = []
+taxons = []
+names = []
+# set up a file to record protein IDs for a tBLASTn
+proteinFile = open("Data Files/Spore_Gene_Protein_Codes.txt", "w")
+proteinFile.write("OTU\tGenome\tGene\tCode\n")
+# loop over all genbank flat files
+for file in files:
+    # pull the OTU out of the file name and print to keep track of progress
+    Otu = file[0:7]
+    print(Otu)
+    # file ID
+    seqID = file[8:35]
+    # path for SeqIO
+    path = "BLAST Directories/Genomes" + "/" + file
+    # set up dictionaries to keep score, refresh gene list for every file
+    numGenes = []
+    numDescript = []
+    scores[Otu + "_" + seqID] = numGenes
+    descripts[Otu + "_" + seqID] = numDescript
+    # refresh the gene matrix
+    for gene in geneMat:
+        geneMat[gene] = 0
+    # load in each file with SeqIO, access the features containing the genes
+    # some files are constructed as one sequence record (use SeqIO.read())
+    try:
+        # record the organism and taxonomy info for each genome
+        organism = SeqIO.read(path, "gb").annotations["organism"]
+        orgs.append(organism)
+        taxonomy = SeqIO.read(path, "gb").annotations["taxonomy"]
+        taxons.append(taxonomy)
+        # sequence identifier to link bit scores
+        seqName = SeqIO.read(path, "gb").id
+        names.append(seqName)
+        # get to the level of features
+        features = SeqIO.read(path, "gb").features
+        for feature in features:
+            # look for gene matches in the gene features
+            if feature.type == "gene":
+                gene = feature.qualifiers.get('gene',[])
+                if len(gene) == 1:
+                    # list only ever contains one item
+                    gene = gene[0]
+                    # look through all spore genes until you find a match
+                    for sporeGene in geneList:
+                        # do not worry about capitilization
+                        if sporeGene.lower() == gene.lower():
+                            # save identified spore gene break out of checking genes
+                            numGenes.append(sporeGene)
+                            # increase counter in gene matrix
+                            geneMat[sporeGene] += 1
+                            break
+            # CDS contains a lot of information
+            if feature.type == "CDS":
+                # get gene name to match to spore list
+                gene = feature.qualifiers.get('gene',[])
+                if len(gene) == 1:
+                    gene = gene[0]
+                    for sporeGene in geneList:
+                        # do not worry about capitilization
+                        if sporeGene.lower() == gene.lower():
+                            # if the gene matches, get its protein ID
+                            proteinID = feature.qualifiers.get('protein_id',[])
+                            if len(proteinID) == 1:
+                                # write the ID into a file with metadata
+                                proteinFile.write(Otu + "\t" + seqID + "\t"
+                                                  + gene + "\t" + proteinID[0] + "\n")
+                # get description
+                rec = feature.qualifiers.get('product',[])
+                # look for keywords in the description
+                if 'spore' in rec[0] or 'sporulation' in rec[0]:
+                    numDescript.append(rec[0])
+      
+    # value error means the file is constructed as multiple records
+    # where all records correspond to the same genome assembly (use SeqIO.parse())
+    except ValueError:
+        seq = SeqIO.parse(path, "gb")
+        for record in seq:
+            features = record.features
+            # code from here on (until file writing) is identical to what was done above
+            for feature in features:
+                if feature.type == "gene":
+                    gene = feature.qualifiers.get('gene',[])
+                    if len(gene) == 1:
+                        gene = gene[0]
+                        for sporeGene in geneList:
+                            if sporeGene.lower() == gene.lower():
+                                numGenes.append(gene)
+                                geneMat[sporeGene] += 1
+                                break
+                if feature.type == "CDS":
+                # get gene name to match to spore list
+                    gene = feature.qualifiers.get('gene',[])
+                    if len(gene) == 1:
+                        gene = gene[0]
+                        for sporeGene in geneList:
+                            # do not worry about capitilization
+                            if sporeGene.lower() == gene.lower():
+                                proteinID = feature.qualifiers.get('protein_id',[])
+                                if len(proteinID) == 1:
+                                    proteinFile.write(Otu + "\t" + seqID + "\t"
+                                                      + gene + "\t" + proteinID[0] + "\n")
+                    rec = feature.qualifiers.get('product',[])
+                    # look for keywords in the description
+                    if 'spore' in rec[0] or 'sporulation' in rec[0]:
+                        numDescript.append(rec[0])
+        # record the organism and taxonomy info for each genome
+        # have to do after looping through all records so we don't have repeats
+        # i.e. all the records that correspond to same genome have this same info
+        organism = record.annotations["organism"]
+        orgs.append(organism)
+        taxonomy = record.annotations["taxonomy"]
+        taxons.append(taxonomy)
+        # sequence identifier to link bit scores
+        seqName = record.id
+        names.append(seqName)
+                
+    # Make the matrix of spore genes by number of hits for each genome
+    sporeScore = 0
+    outMatrix.write(Otu + '\t' + seqID + '\t')
+    for gene in geneMat:
+        outMatrix.write(str(geneMat[gene]) + '\t')
+        if geneMat[gene] > 0:
+            sporeScore += 1
+    outMatrix.write(str(sporeScore/66))
+    outMatrix.write('\n')
+    
+# close file after all files have been parsed
+outMatrix.close()
+proteinFile.close()
+
+# write the scores for all genes (even repeats) out to a file
+# this file also records the organism and taxonomy information
+with open("BLAST Directories/BLAST Gene Counts.txt", "w") as outFile:
+    # file header
+    outFile.write("Otu\tGenome\tOrganism\tTaxonomy\tNumber of Spore Genes\tSequence ID\n")
+    # counter to keep place in organism and taxon list
+    idx = 0
+    for Otus in scores:
+        # isolate the OTU and seqID
+        Otu = Otus[0:7]
+        seqNum = Otus[8:len(Otus)]
+        outFile.write(Otu + '\t' + seqNum + '\t')
+        # write out the organism and taxon info
+        taxon = str(taxons[idx])
+        outFile.write(orgs[idx] + "\t" + taxon[1:len(taxon)-1] + "\t")
+        # write out the number of spore genes
+        outFile.write(str(len(scores[Otus])) + "\t")
+        # include the name of the sequence to link to bit scores
+        outFile.write(names[idx])
+        outFile.write('\n')
+        idx += 1
+outFile.close()
+
+# write the scores for all descriptions out to a file
+with open("BLAST Directories/BLAST Descripts Counts.txt", "w") as outFile:
+    for Otus in descripts:
+        Otu = Otus[0:7]
+        seqNum = Otus[8:len(Otus)]
+        outFile.write(Otu + '\t' + seqNum + '\t')
+        outFile.write(str(len(descripts[Otus])))
+        outFile.write('\n')
+outFile.close()
+
+# write all the genes (even repeats) out to a file
+
+'''
+with open("BLAST Directories/BLAST Genes.txt", "w") as outFile:
+    for Otus in scores:
+        Otu = Otus[0:7]
+        seqNum = Otus[8:len(Otus)]
+        outFile.write(Otu + '\t' + seqNum + '\t')
+        for genomeGenes in scores[Otus]:
+            if genomeGenes != '':
+                outFile.write(genomeGenes + '\t')
+        outFile.write('\n')
+outFile.close()
+'''
+
+# write all the descriptions out to a file
+'''
+with open("BLAST Directories/BLAST Descriptions.txt", "w") as outFile:
+    for Otus in descripts:
+        Otu = Otus[0:7]
+        seqNum = Otus[8:len(Otus)]
+        outFile.write(Otu + '\t' + seqNum + '\t')
+        for genomeGenes in descripts[Otus]:
+            if genomeGenes != '':
+                outFile.write(genomeGenes + '\t')
+        outFile.write('\n')
+outFile.close()
+'''
+
+# these files take the repeats out of the gene lists
+'''
+# write the scores for unique genes (NO repeats) out to a file
+with open("BLAST Directories/BLAST Gene Counts Unique.txt", "w") as outFile:
+    for Otus in scores:
+        Otu = Otus[0:7]
+        # make gene list a set of unique items
+        unique = set(scores[Otus])
+        seqNum = Otus[8:len(Otus)]
+        outFile.write(Otu + '\t' + seqNum + '\t')
+        outFile.write(str(len(unique)))
+        outFile.write('\n')
+outFile.close()
+
+# write the unique genes (NO repeats) out to a file
+with open("BLAST Directories/BLAST Genes Unique.txt", "w") as outFile:
+    for Otus in scores:
+        Otu = Otus[0:7]
+        seqNum = Otus[8:len(Otus)]
+        outFile.write(Otu + '\t' + seqNum + '\t')
+        # make gene list a set of unique items
+        unique = set(scores[Otus])
+        for genomeGenes in unique:
+            outFile.write(genomeGenes + '\t')
+        outFile.write('\n')
+outFile.close()
+'''
+
+# this code was used when we were looking through the CDS features
+# to use again, you also have to add the switch back into the gene part
+'''
+# set the switch to off
+found = False
+# get the description (rec) and gene name (gene)
+rec = feature.qualifiers.get('product',[])
+gene = feature.qualifiers.get('gene',[])
+# make sure the gene name list is not empty
+if len(gene) == 1:
+    # list only ever contains one item
+    gene = gene[0]
+    # look through all spore genes until you find a match
+    for sporeGene in geneList:
+        # do not worry about capitilization
+        if sporeGene.lower() == gene.lower():
+            # change switch to on
+            found = True
+            # save identified spore gene break out of checking genes
+            numGenes.append(gene)
+            # increase counter in gene matrix
+            geneMat[gene] += 1
+            break
+# only look through the description only if the gene was not in the list
+# "if the switch is off"
+if not found:
+'''
