@@ -1,0 +1,70 @@
+# first file in approach of getting a bunch of sporeulating bacteria in a local database
+######################################### Imports ############################################
+from Bio import Entrez
+import time
+Entrez.email = "karlin.havlak@gmail.com"
+############################## PART 1, Gene Names to Protein Accession Numbers ############################
+
+###### Load List of Spore Genes and Place in Dictionary
+genes = {}
+geneList = []
+with open("Sporulation Gene List 1.txt") as sporeGenes:
+    sporeGenes.readline()
+    sporeGenes.readline()
+    # loop over file and put genes in a list
+    for line in sporeGenes:
+        line = line.split()
+        geneList.append(line[0])
+        genes[line[0]] = {}
+sporeGenes.close()
+
+# number of genes in the list
+print("Number of genes:",len(geneList))
+
+###### Getting Reference Protein Info from Gene Name with Entrez
+# this loop stores all protein accession numbers associated with each gene name
+for i in range(0, 5):
+    gene = geneList[i]    
+    # this search finds the protein sequence accession numbers from gene name
+    # was able to grab three more proteins (spo0A) after doubling retmax from 100 to 200
+    handle = Entrez.esearch(db = "protein", term = gene, rettype = 'native',
+                          retmode = 'xml', retmax = 200, idtype = 'acc')
+    result = Entrez.read(handle)
+    handle.close()
+    time.sleep(0.5)
+    # get the sequence IDs from the search
+    IDs = ','.join(result['IdList'])
+    IDs = IDs.split(',')
+    # dictionary to store accession numbers into
+    access = {}
+    proteins = 0
+    # this loop stores protein accession numbers and taxa from the gene
+    for i in range(0, 10):
+        ID = IDs[i]
+        # this search uses the accession to get taxa info and filter
+        handle = Entrez.efetch(db="protein", id=ID, rettype='gp', retmode = "xml")
+        result = Entrez.read(handle)
+        handle.close()
+        time.sleep(3)
+        # ensure sporulation is part of accession description 
+        if "sporulation" in str(result) or "spore" in str(result):
+            taxa = result[0]['GBSeq_definition'].split('[')
+            taxa = taxa[-1][0:-1]
+            access[ID] = [taxa]
+            genes[gene] = access
+            proteins += 1
+    print("Number of proteins for", gene, ":" , proteins)
+
+# write the obtained dictionary into a file for the second section
+with open("genesDict.txt", "w") as f:
+    for gene in genes:
+        for protein in genes[gene]:
+            organism = genes[gene][protein][0]
+            f.write(gene + '\t' + protein + '\t' + organism)
+            f.write('\n')
+f.close()
+
+
+#print(genes)
+
+
