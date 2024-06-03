@@ -1,0 +1,175 @@
+############ this script parses BLAST xml results and makes ftp links with unique
+############ identifiers for hits that meet a certain threshold
+from Bio.Blast import NCBIXML
+from Bio import Entrez, SeqIO
+Entrez.email = "karlin.havlak@gmail.com"
+import time
+import os
+from io import BytesIO
+
+
+BLASTfiles = []
+directory = os.fsencode("BLAST Directories/")
+# put the file names of each downloaded BLAST xml in a list
+for file in os.listdir(directory):
+    if ".xml" in str(file):
+        filename = directory + file
+        BLASTfiles.append(filename)
+#print(BLASTfiles)
+
+# open a file to record the number of genomes for each OTU
+outFile = open("Data Files/Num Genomes BLAST(pident90).txt", "w")
+
+        
+# master dictionary and tracker to count the number of OTUs without hits
+results = {}
+numZeros = 0
+zeros = []
+totGenomes = 0
+for file in BLASTfiles:
+    result_handle = open(file)
+    blast_records = NCBIXML.parse(result_handle)
+    # this loop goes through each OTU BLAST result
+    for OTU_rec in blast_records:
+        # pull out OTU name and length
+        OTU = OTU_rec.query
+        OTUlength = OTU_rec.query_length
+        # begin inner dictionary for a given OTU
+        hits = {}
+        results[OTU] = hits
+        # track the alignments that are complete genomes and hits
+        compAligns = 0
+        totHits = 0
+        #print(OTU, OTUlength)
+        # this loop goes over every BLAST record for a given OTU
+        for alignment in OTU_rec.alignments:
+            compAligns += 1
+            #print(alignment)
+            # details for every hsp in an alignment
+            for hsp in alignment.hsps:
+                #print(hsp.score)
+                # calculate the percent identity
+                pident = round(100*(hsp.identities/hsp.align_length))
+                # calculate the total coverage
+                coverage = round(100*(hsp.align_length/OTUlength))
+                #print(pident, coverage)
+                # use pident and coverage thresholds to filter
+                if pident >= 90 and coverage >= 90:
+                    # grab the bit score
+                    score = hsp.score
+                    # pull out the gi and gb sequence IDs and description
+                    title = alignment.title.split('|')
+                    gi = title[1]
+                    gb = title[3]
+                    descript = title[4]
+                    # make sure this is not a repeat (multiple alignment)
+                    repeat = False
+                    for key in hits:
+                        if key == gi:
+                            repeat = True
+                    # build inner dictionary using gi identifier as the key        
+                    if not repeat:
+                        totHits += 1
+                        hits[gi] = [gb, descript, score]
+                        
+        # keep track of number of genomes and OTUs without any hits
+        outFile.write(OTU + '\t' + str(totHits) + '\n')
+        totGenomes += totHits
+        if totHits == 0:
+            numZeros += 1
+            zeros.append(OTU)
+        # report results for every OTU
+        print(OTU, "has", compAligns, 'total genomes of which', totHits,
+                'met the threshold')
+    # close current file
+    result_handle.close()
+# close outFile recording hits per OTU
+outFile.close()
+# at pident = 97 there are 64 without hits, pident = 95 there are 34, pident = 90 there are 6 without hits
+# at coverage = 100 there are 176, coverage = 95 there are 174, coverage = 90 there are 174
+print('There are', numZeros, "OTUs without any associated complete genomes.")
+print("There are", totGenomes, "total genomes to download.")
+
+with open("BLAST Directories/BLASTResultsDict(pident90).txt", 'w') as outFile:
+    for OTU in results:
+        print(OTU)
+        for ID in results[OTU]:
+            info = results[OTU][ID]
+            outFile.write(OTU + '\t' + ID + '\t' + info[0] + '\t' + info[1] + '\t' + str(info[2]) + '\n')
+outFile.close()
+#print(len(zeros), zeros)
+
+
+'''
+# this section formats ftp links for the hits above
+genomeCount = 0
+deletes = 0
+badFormats = 0
+# open file to store download info
+with open("Data Files/BLAST Directories/OTU_BLAST_GenomeLinks.txt", "w") as outFile:
+    outFile.write("UniqueID\tftpLink\n")
+    # parse through the dictionary build above
+    for OTU in results:
+        print('getting links for', OTU)
+        links = []
+        # go through every sequence ID
+        for key in results[OTU]:
+            aLink = []
+            # use gb ID to get IDs for ftp link (gi ID doesn't work)
+            gbID = results[OTU][key][0]
+            print(gbID)
+            # get nucleotide record containing assembly
+            handle = Entrez.efetch(db = "nucleotide", id = gbID, rettype = "native",
+                                   retmode = "xml")
+            result = Entrez.read(handle)
+            handle.close()
+            time.sleep(0.5)
+            # brute force search through the results for the assembly
+            res = str(result)
+            assembly = ''
+            # assemblies start with "GCA" or "GCF" and are the same length
+            if "GCF_" in res:
+                assemblyIndex = res.index("GCF_")
+                assembly = res[assemblyIndex:assemblyIndex + 15]
+                print(assembly)
+            elif "GCA_" in res:
+                assemblyIndex = res.index("GCA_")
+                assembly = res[assemblyIndex:assemblyIndex + 15]
+                print(assembly)
+            if assembly != '':
+                # use assembly to search for second ID
+                handle = Entrez.esearch(db = "assembly", term = assembly)
+                result = Entrez.read(handle)
+                handle.close()
+                time.sleep(0.5)
+                if len(result['IdList']) != 0:
+                    handle = Entrez.esummary(db="assembly", id=result['IdList'][0], report="full")
+                    summary = Entrez.read(handle)
+                    handle.close()
+                    time.sleep(0.5)
+                    # format link and label from result summary
+                    url = summary['DocumentSummarySet']['DocumentSummary'][0]['FtpPath_RefSeq']
+                    label = os.path.basename(url)
+                    link = os.path.join(url+"/",label+'_genomic.gbff.gz')
+                    # quality assurance of information to be downloaded
+                    if label != '' and not label.endswith("MAG"):
+                        genomeCount += 1
+                        # store unique ID and link into a list of lists for each OTU
+                        uniqueID = OTU + '_' + label
+                        aLink.append(uniqueID)
+                        aLink.append(link)
+                        links.append(aLink)
+                    else:
+                        deletes += 1
+                else:
+                    badFormats += 1
+            else:
+                print("no assembly or genomes")
+        # write the link info into the file after all links collected
+        for link in links:
+            outFile.write(link[0] + '\t' + link[1] + '\n')
+outFile.close()
+print(genomeCount, "genomes remain after", deletes, "deleted, and",
+      badFormats, "were removed due to blank ID lists.")
+
+'''
