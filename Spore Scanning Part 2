@@ -1,0 +1,167 @@
+# second file in approach of getting a local blast database of sporulators
+######################################### Imports ############################################
+from Bio import Entrez
+import time
+Entrez.email = "karlin.havlak@gmail.com"
+#################################### PART 2, Retrieve Assemblies #####################################
+genes = {}
+proteins = {}
+geneList = []
+# load in the dictionary from the Spore Scanning Part 1
+with open('genesDictPartial.txt', 'r') as inFile:
+    for line in inFile:
+        line = line.split('\t')
+        gene = line[0]
+        protein = line[1]
+        organism = line[2][0:-1]
+        # fix organisms that somehow ended up with ']' at the end
+        if ']' in organism:
+            org = organism.split(']')
+            organism = ''
+            for i in range(0, len(org)):
+                organism += org[i]
+        # update a gene entry with more organisms
+        if gene in genes:
+            proteins[protein] = [organism]
+            genes[gene] |= proteins
+        # gene is not in genes yet
+        else:
+            proteins = {}
+            proteins[protein] = [organism]
+            genes[gene] = proteins
+        # this is for gene metadata file
+        if gene not in geneList:
+            geneList.append(gene)
+inFile.close()
+
+#print(genes)
+
+###### Get the assemblies for each protein accession using the IPG report and store
+for gene in genes:
+    print("getting assemblies for",gene)
+    for accession in genes[gene]:
+        # get GenBank assembly from protein accession number using IPG report
+        handle = Entrez.efetch(db = "protein", id = accession, rettype = 'ipg', retmode = 'xml')
+        result = Entrez.read(handle)
+        handle.close()
+        time.sleep(0.5)
+        # get Genbank assembly from report which lives in the ProteinList
+        #print(result)
+        if "ProteinList" in result["IPGReport"]:
+            info = result["IPGReport"]["ProteinList"]
+            info = str(info)
+            info = info.split('\'')
+            # control for IPG reports that don't have assembly information
+            if 'assembly' not in info:
+                pass
+            else:
+                # this bit of the report is of form ['assembly', ':', 'GCF...'] after split
+                index = info.index('assembly')
+                assembly = info[index+2]
+                # control for blank assemblies and store taxa data for assembly
+                if assembly != '':
+                    index = info.index('org')
+                    assemblyTaxa = info[index+2]
+                    genes[gene][accession].append(assembly)
+                    genes[gene][accession].append(assemblyTaxa)
+
+'''
+# uncomment this block if needed, it makes a file of the nested dictionary
+                
+# we now have a dictionary of genes with nested dictionary of proteins
+# protein dictionary has a list of: 1)protein taxa, 2)assembly accession 3)assembly taxa
+with open('proteinMetadata.txt', 'w') as f:
+    f.write('Gene,ProteinID,ProteinTaxa,GenomeTaxa\n')
+    for gene in genes:
+        for protein in genes[gene]:
+            f.write(gene +',' + protein + ',' + genes[gene][protein][0] + ',' + genes[gene][protein][0])
+            f.write('\n')
+f.close()
+
+'''
+
+##### Quality Control remove duplicate assemblies and those not properly annotated
+##### Store information in new nested dictionary called 'genomes' of form {gene{organism{assemblies:[]}}}
+
+# keep track of duplicate and genome totals for metadata file at the end
+duplicateList = []
+genomeList = []
+overallGenomeCount = 0
+overallDuplicateCount = 0
+proteinCounts = []
+# sort through the genes and add in organism and assembly info into new data structure
+genomes = {}
+for gene in genes:
+    print("reorganizing data for", gene)
+    genomeCount = 0
+    duplicates = 0
+    proteins = 0
+    organisms = {}
+    genomes[gene] = organisms
+    # go through all proteins
+    for accession in genes[gene]:
+        proteins += 1
+        genomeInfo = {}
+        # make sure we have a genome
+        if len(genes[gene][accession]) == 3:
+            taxaProt = genes[gene][accession][0]
+            assembly = genes[gene][accession][1]
+            taxaGenome = genes[gene][accession][2]
+            # make sure the genome taxa matches the protein taxa CUT THIS NICK??? YES
+            protFirst = taxaProt.split()[0]
+            if taxaProt == taxaGenome or protFirst in taxaGenome:
+                # add info into nested dictionary of {gene{organism{genome:[]}}}
+                # check if the organism is already in the dictionary
+                if taxaProt in genomes[gene]:
+                    # remove duplicate assembly IDs
+                    duplicate = False
+                    for key in genomes[gene][taxaProt]:
+                        # take out assembly header (e.g. "GCA", "GCF") for accuracy
+                        if assembly[3:-1] == key[3:-1]:
+                            duplicate = True
+                            duplicates += 1
+                    # add non-duplicate assembly into organism dictionary by updating
+                    if not duplicate:
+                        genomeCount += 1
+                        genomeInfo[assembly] = []
+                        organisms[taxaProt] |= genomeInfo
+                # add in a new organism and its associated assembly
+                else:
+                    genomeCount += 1
+                    genomeInfo[assembly] = []
+                    organisms[taxaProt] = genomeInfo
+            else:
+                print("troubleshooting", taxaProt, taxaGenome)
+                
+ 
+    # store/print genome metadata
+    duplicateList.append(duplicates)
+    genomeList.append(genomeCount)
+    proteinCounts.append(proteins)
+    #print(gene, "has", genomeCount, "genomes.", duplicates, "genomes were duplicated.") 
+    overallGenomeCount += genomeCount
+    overallDuplicateCount += duplicates
+
+#print(genomes)
+
+# write a file from the genome dictionary for part three
+with open('genomesDict.txt', 'w') as f:
+    for gene in genomes:
+        for organism in genomes[gene]:
+            for assembly in genomes[gene][organism]:
+                f.write(gene + '\t' + organism + '\t' + assembly)
+                f.write('\n')
+f.close()
+
+print(overallGenomeCount, "genomes discovered", overallDuplicateCount, "duplicates removed.")
+
+
+# write a file that contains numbers of proteins and genomes kept and deleted
+with open('ProteinsAndGenomesByGene.txt', 'w') as f:
+    f.write('Gene,Number of Proteins,Original Number of Genomes,Genome Duplicates, Original Genome Count\n')
+    for i in range(0, len(geneList)):
+        origCount = genomeList[i] + duplicateList[i]
+        f.write(geneList[i] + ',' + str(proteinCounts[i]) + ',' + str(genomeList[i]) + ',' +
+                str(duplicateList[i]) + ',' + str(origCount) + '\n')
+f.close()
+
