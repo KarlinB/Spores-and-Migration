@@ -1,0 +1,50 @@
+# bash code generated during project
+
+
+# Final cURL loop that actually works!!!!! Use in conjunction with file: OTU_BLAST_GenomeLinks_Full.txt
+# downloads files from FTP links and names them as the unique genome labels
+
+while read -r ID FTP; do
+  sleep 2
+  FTP=${FTP%$'\r'}
+  curl --user "anonymous:karlin.havlak@gmail.com" $FTP --output 'Curl_Directory/BLAST_Genomes/'$ID'.gbff.gz';
+  echo ID=$ID FTP=$FTP
+done < Curl_Directory/OTU_BLAST_GenomeLinks_Subset.txt
+
+# echo at end can help you keep track of progress
+# "FTP=${FTP%$'\r'}:" removes a trailing \r that was fucking the link up
+# sleep takes a two second pause
+# change file and directory as needed in output and after done
+# This link type works!!!
+# ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/033/568/485/GCF_033568485.1_ASM3356848v1/GCF_033568485.1_ASM3356848v1_genomic.fna.gz
+# These commands work!!!!
+# curl --user anonymous:karlin.havlak@gmail.com ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/033/568/485/GCF_033568485.1_ASM3356848v1/GCF_033568485.1_ASM3356848v1_genomic.fna.gz --output Otu0001_GCF_033568485.1_ASM3356848v1.fna.gz
+# curl --user anonymous:karlin.havlak@gmail.com "ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/002/959/875/GCF_002959875.1_ASM295987v1/GCF_002959875.1_ASM295987v1_genomic.gbff.gz" --output Otu0163_GCF_002959875.1_ASM295987v1.gbff.gz
+	
+
+# script to generate all the blast queries for a given set of fasta files and blast databases
+
+# loop to run BLAST with
+# query we want to build: tblastn -query /home/q77d617/R/Spore_Fastas/abrB_protein_seqs.fasta -db BLAST_DB_Files/pident97_BLASTDB_17 -out abrB_results/abrB_tBLAST_query_17.xml -outfmt 5
+
+# this chunk adds the protein names into an array called proteinArray
+proteinArray=()
+for file in /home/q77d617/R/Spore_Fastas/*; do
+  #echo "${file##*/}"
+  # this line gets the protein names, d=delimeter and f=which substring to get
+  prot=$(echo "${file##*/}" | cut -d'_' -f 1)
+  proteinArray+=($prot)
+done
+
+# run this to make sure you are getting all the things
+#for i in "${proteinArray[@]}"; do echo "$i" ; done
+
+# build the blast queries with a nested loop
+# "i" iterates over protein names and j iterates over integers 1-17 for each database
+for i in "${proteinArray[@]}"; do for j in {1..17}; do echo "tblastn -query /home/q77d617/R/Spore_Fastas/"$i"_protein_seqs.fasta -db BLAST_DB_Files/pident97_BLASTDB_"$j" -out "$i"_results/"$i"_tBLAST_query_"$j".xml -outfmt 5";done;done
+
+
+
+# code to make a bunch of directories
+for i in "${proteinArray[@]}"; do mkdir "/home/q77d617/R/"$i"_results/"; done
+
